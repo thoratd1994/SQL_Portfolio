@@ -1,0 +1,259 @@
+CREATE TABLE covid_deathdata (
+    iso_code                          VARCHAR,
+    continent                         VARCHAR,
+    loc                          VARCHAR,
+    reg_date                              DATE,
+    population                        INTEGER,
+    total_cases                       FLOAT,
+    new_cases                         FLOAT,
+    new_cases_smoothed                FLOAT,
+    total_deaths                      FLOAT,
+    new_deaths                        FLOAT,
+    new_deaths_smoothed               FLOAT,
+    total_cases_per_million           FLOAT,
+    new_cases_per_million             FLOAT,
+    new_cases_smoothed_per_million    FLOAT,
+    total_deaths_per_million          FLOAT,
+    new_deaths_per_million            FLOAT,
+    new_deaths_smoothed_per_million   FLOAT,
+    reproduction_rate                 FLOAT,
+    icu_patients                      FLOAT,
+    icu_patients_per_million          FLOAT,
+    hosp_patients                     FLOAT,
+    hosp_patients_per_million         FLOAT,
+    weekly_icu_admissions             FLOAT,
+    weekly_icu_admissions_per_million FLOAT,
+    weekly_hosp_admissions            FLOAT,
+    weekly_hosp_admissions_per_million FLOAT
+);
+
+SELECT *
+FROM public.covid_deathdata;
+
+CREATE TABLE covid_vaccinedata (
+    iso_code varchar,
+    continent varchar,
+    loc varchar,
+    reg_date date,
+    total_tests float,
+    new_tests float,
+    total_tests_per_thousand float,
+    new_tests_per_thousand float,
+    new_tests_smoothed float,
+    new_tests_smoothed_per_thousand float,
+    positive_rate float,
+    tests_per_case float,
+    tests_units varchar,
+    total_vaccinations float,
+    people_vaccinated float,
+    people_fully_vaccinated float,
+    total_boosters float,
+    new_vaccinations float,
+    new_vaccinations_smoothed float,
+    total_vaccinations_per_hundred float,
+    people_vaccinated_per_hundred float,
+    people_fully_vaccinated_per_hundred float,
+    total_boosters_per_hundred float,
+    new_vaccinations_smoothed_per_million float,
+    new_people_vaccinated_smoothed float,
+    new_people_vaccinated_smoothed_per_hundred float,
+    stringency_index float,
+    population_density float,
+    median_age float,
+    aged_65_older float,
+    aged_70_older float,
+    gdp_per_capita float,
+    extreme_poverty float,
+    cardiovasc_death_rate float,
+    diabetes_prevalence float,
+    female_smokers float,
+    male_smokers float,
+    handwashing_facilities float,
+    hospital_beds_per_thousand float,
+    life_expectancy float,
+    human_development_index float,
+    excess_mortality_cumulative_absolute float,
+    excess_mortality_cumulative float,
+    excess_mortality float,
+    excess_mortality_cumulative_per_million float
+);
+
+-- Drop the table if it already exists
+DROP TABLE IF EXISTS covid_vaccinedata;
+
+-----************ DATA VALIDATION & DATA CLEANING ************-------------
+----Verified the row count with the Source----
+SELECT count(*)
+FROM public.covid_vaccinedata;
+ 
+-- To check the available column in covid_vaccinedata_table
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'covid_vaccinedata';
+
+-- To check the available column in covid_deathdata_table
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'covid_deathdata';
+
+--Check all the data---
+SELECT *
+FROM covid_deathdata
+WHERE continent is not null
+ORDER BY 3,4
+
+-- Check the duplicate value in table--
+SELECT date, location, COUNT(*) as count
+FROM covid_deathdata
+GROUP BY 1,2
+HAVING COUNT(*) >1
+
+--- Seen the Null values for Continent so removed those record from analysis--- 
+SELECT location, date, total_cases, new_cases, total_deaths, population
+FROM covid_deathdata 
+WHERE continent is not null
+ORDER BY 1,2
+
+-------------**********DATA EXPLORATION**********----------------------------------
+
+--- Contries with Total Death-----
+SELECT  DISTINCT EXTRACT( YEAR FROM (cast(date as Date))) ,location,  COALESCE(SUM(total_deaths),0) as total_deaths
+FROM covid_deathdata 
+WHERE continent is not null
+--and location ILIKE '%states%'
+GROUP BY 1,2
+ORDER BY 3 desc;
+
+--- Continent with Total Death-----
+SELECT  DISTINCT EXTRACT( YEAR FROM (cast(date as Date))),continent, SUM(total_deaths) as total_deaths
+FROM covid_deathdata 
+WHERE continent is not null
+--and location ILIKE '%states%'
+GROUP BY 1,2
+ORDER BY 3 desc;
+
+---Now we want to check for Population and Vaccianation --
+-- Performed Joins to see both the data--- 
+---- Rolling People Vaccinated -----
+Select d.continent, d.location, d.date, d.population, v.new_vaccinations,
+COALESCE(SUM(CAST(v.new_vaccinations as int)) OVER (Partition by d.Location Order by d.location, d.date),0) as RollingPeopleVaccinated
+From covid_deathdata d
+LEFT JOIN covid_vaccinedata v
+ON d.date = v.date AND d.location = v.location
+where d.continent is not null
+ORDER BY 2,3;
+
+------Now we can use the CTE to calculate the Rolling_People_vacinated_rate---
+WITH CTE AS (
+Select d.continent, d.location, d.date, d.population, v.new_vaccinations,
+SUM(CAST(v.new_vaccinations as int)) OVER (Partition by d.Location Order by d.location, d.date) as RollingPeopleVaccinated
+From covid_deathdata d
+LEFT JOIN covid_vaccinedata v
+ON d.date = v.date AND d.location = v.location
+where d.continent is not null
+)
+
+SELECT *, (RollingPeopleVaccinated/population)*100 as rolling_people_vaccinated 
+FROM CTE;
+
+----Case Fatality Rate-------
+SELECT location, date, SUM(total_cases) as total_cases, SUM(total_deaths) as total_deaths, 
+MAX(population) as population, 
+((SUM(total_deaths)/SUM(total_cases))*100) as case_fatality_rate
+FROM covid_deathdata 
+WHERE continent is not null and location ILIKE '%states%'
+GROUP BY 1,2
+ORDER BY 1,2; 
+
+----- Covid Positive rate-----
+SELECT d.location, d.date, SUM(d.total_cases) as total_cases,
+SUM(d.total_deaths) as total_deaths, 
+MAX(d.population) as population,
+((SUM(d.total_cases)/SUM(v.total_tests))*100) as positive_rate
+FROM covid_deathdata d
+JOIN covid_vaccinedata v
+ON d.date = v.date AND d.location = v.location
+WHERE d.continent is not null and d.location ILIKE '%states%'
+GROUP BY 1,2
+ORDER BY 1,2; 
+
+---- Mortality Rate ---
+SELECT d.location, d.date,
+SUM(d.total_deaths) as total_deaths, 
+MAX(d.population) as population,
+((SUM(d.total_deaths)/MAX(d.population))*100) as total_mortality_rate
+FROM covid_deathdata d
+JOIN covid_vaccinedata v
+ON d.date = v.date AND d.location = v.location
+WHERE d.continent is not null and d.location ILIKE '%states%'
+GROUP BY 1,2
+ORDER BY 1,2; 
+
+-- Now we are going to create a View with extracted Fileds --- 
+----Selected the required Filed and replace a Null Values with 0 ----
+
+CREATE OR REPLACE VIEW covid_data_view AS
+WITH cte AS (
+  SELECT d.continent,
+         d.location,
+         CAST(d.date AS Date) AS reg_date,
+         MAX(d.population) AS population,
+         COALESCE(SUM(d.total_cases), 0) AS total_cases,
+         COALESCE(SUM(d.new_cases), 0) AS new_cases,
+         COALESCE(SUM(d.total_deaths), 0) AS total_deaths,
+         COALESCE(SUM(d.new_deaths), 0) AS new_deaths,
+         COALESCE(SUM(d.icu_patients), 0) AS icu_patients,
+         COALESCE(SUM(d.hosp_patients), 0) AS hosp_patients,
+         COALESCE(SUM(v.total_tests), 0) AS total_tests,
+         COALESCE(SUM(v.new_tests), 0) AS new_tests,
+         COALESCE(SUM(v.total_vaccinations), 0) AS total_vaccinations,
+         COALESCE(SUM(v.new_vaccinations), 0) AS new_vaccinations,
+         COALESCE(SUM(v.people_fully_vaccinated), 0) AS people_fully_vaccinated,
+         COALESCE(SUM(v.total_boosters), 0) AS total_boosters
+  FROM covid_deathdata d
+  LEFT JOIN covid_vaccinedata v ON d.date = v.date AND d.location = v.location
+  WHERE d.continent IS NOT NULL
+    --AND d.date = '2022-03-24'
+  GROUP BY d.continent, d.location, CAST(d.date AS Date)
+  ORDER BY d.location, CAST(d.date AS Date)
+)
+
+SELECT continent,
+       location,
+       reg_date,
+       population,
+       total_cases,
+       new_cases,
+       total_deaths,
+       new_deaths,
+       icu_patients,
+       hosp_patients,
+       total_tests,
+       new_tests,
+       total_vaccinations,
+       new_vaccinations,
+       people_fully_vaccinated,
+       total_boosters,
+       CASE WHEN total_cases = 0 THEN NULL ELSE (total_deaths/total_cases)*100 END AS case_Fatility_rate,
+	   CASE WHEN total_tests = 0 THEN NULL ELSE ((total_cases/total_tests)*100) END as  Test_Positive_rate,
+	   ((total_deaths/population)*100) as  Mortality_rate,
+	   (total_tests/population) as  test_Per_capita,
+	   ((people_fully_vaccinated/population)*100) as  Fully_vaccinated_rate,
+	   ((total_boosters/population)*100) as  booster_rate,
+       SUM(new_vaccinations) OVER (PARTITION BY location ORDER BY reg_date) AS RollingPeopleVaccinated
+FROM cte
+ORDER BY location, reg_date;
+
+--DROP view covid_data_view;
+
+SELECT * FROM 
+covid_data_view;
+
+
+
+
+
+
+
+
+
